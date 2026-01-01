@@ -173,11 +173,14 @@ Each monitor layout is saved as a `.dml` (DCS Monitor Layout) file containing:
 ### Viewports
 - Left, Center, Right (3D world views)
 
-### F/A-18C Panels
-- IFEI, RWR, SARI
+### Default ViewPorts (Most Aircrafts support them)
 - LEFT_MFCD, CENTER_MFCD, RIGHT_MFCD
 
-*More panels can be added to the dropdown list in the source code.*
+### F/A-18C Panels
+- IFEI, RWR, SARI
+
+
+*More panels will be added in the Future also for different AirCrafts. Contact me and I will do my best to get it implemented as quick as I can.*
 
 ---
 
