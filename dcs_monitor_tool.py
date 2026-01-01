@@ -1018,6 +1018,9 @@ class MainWindow(QMainWindow):
             
             print(f"Successfully loaded {loaded_count} monitor assignments from {fn}")
             
+            # Update DCS coordinates and bounding box after loading
+            self.update_all_labels_with_dcs_coords()
+            
         except json.JSONDecodeError as e:
             print(f"Error parsing .dml file: {e}")
         except Exception as e:
@@ -1062,8 +1065,12 @@ class MainWindow(QMainWindow):
         # Save current assignments
         self.save_current_assignments()
         
-        # Clear all items from the scene
+        # Clear all items from the scene (also clears bounding box references)
         self.scene.clear()
+        
+        # Reset bounding box references since scene.clear() deleted them
+        self.dcs_bbox_rect = None
+        self.dcs_bbox_label = None
         
         # Reload monitors
         self.load_windows_monitors()
@@ -1148,11 +1155,22 @@ class MainWindow(QMainWindow):
     
     def update_dcs_bounding_box(self):
         """Draw orange bounding box around all assigned monitors (DCS render area)"""
-        # Remove old bounding box if exists
-        if hasattr(self, 'dcs_bbox_rect'):
-            self.scene.removeItem(self.dcs_bbox_rect)
-        if hasattr(self, 'dcs_bbox_label'):
-            self.scene.removeItem(self.dcs_bbox_label)
+        # Remove old bounding box if exists and is still in scene
+        if hasattr(self, 'dcs_bbox_rect') and self.dcs_bbox_rect is not None:
+            try:
+                if self.dcs_bbox_rect.scene() == self.scene:
+                    self.scene.removeItem(self.dcs_bbox_rect)
+            except RuntimeError:
+                pass  # Already deleted
+            self.dcs_bbox_rect = None
+            
+        if hasattr(self, 'dcs_bbox_label') and self.dcs_bbox_label is not None:
+            try:
+                if self.dcs_bbox_label.scene() == self.scene:
+                    self.scene.removeItem(self.dcs_bbox_label)
+            except RuntimeError:
+                pass  # Already deleted
+            self.dcs_bbox_label = None
         
         # Get all assigned monitors (not UNASSIGNED or MONITOR_X)
         assigned_items = []
