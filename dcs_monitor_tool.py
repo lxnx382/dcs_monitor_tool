@@ -5,10 +5,52 @@ from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QGraphicsView, QGraphicsScene,
     QGraphicsRectItem, QVBoxLayout, QPushButton, QFileDialog, QMenu,
-    QDialog, QTextEdit, QHBoxLayout, QComboBox, QLabel
+    QDialog, QTextEdit, QHBoxLayout, QComboBox, QLabel, QLineEdit
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPen, QColor
+
+
+# =========================
+# Custom Widgets (no scroll change)
+# =========================
+
+class NoScrollComboBox(QComboBox):
+    """ComboBox that ignores mouse wheel events unless focused"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.monitor_item = None  # Will be set by MonitorItem
+    
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+    
+    def showPopup(self):
+        """Bring parent monitor to front when dropdown is opened"""
+        if self.monitor_item and hasattr(self.monitor_item, 'bring_to_front'):
+            self.monitor_item.bring_to_front()
+        super().showPopup()
+
+class NoScrollLineEdit(QLineEdit):
+    """LineEdit that ignores mouse wheel events unless focused"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.monitor_item = None  # Will be set by MonitorItem
+    
+    def wheelEvent(self, event):
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+    
+    def focusInEvent(self, event):
+        """Bring parent monitor to front when focused"""
+        super().focusInEvent(event)
+        # Bring monitor to front if reference exists
+        if self.monitor_item and hasattr(self.monitor_item, 'bring_to_front'):
+            self.monitor_item.bring_to_front()
 
 
 # =========================
@@ -61,7 +103,8 @@ class MonitorItem(QGraphicsRectItem):
             "padding: 4px;"
         )
 
-        self.combo = QComboBox()
+        self.combo = NoScrollComboBox()
+        self.combo.monitor_item = self  # Reference to parent MonitorItem
         self.combo.addItems([
             "UNASSIGNED",
             "Viewport: Left",
@@ -76,8 +119,8 @@ class MonitorItem(QGraphicsRectItem):
         ])
         self.combo.currentTextChanged.connect(self.apply_selection)
         
-        # Connect activated signal to bring this monitor to front when dropdown is clicked
-        self.combo.activated.connect(self.bring_to_front)
+        # No longer need activated signal since showPopup handles bring_to_front
+        # self.combo.activated.connect(self.bring_to_front)
 
         self.proxy_label = QGraphicsProxyWidget(self)
         self.proxy_label.setWidget(self.label)
@@ -89,13 +132,24 @@ class MonitorItem(QGraphicsRectItem):
         self.proxy_combo.setWidget(self.combo)
         self.proxy_combo.setZValue(10)  # Above the rectangle
 
-        # Virtuelle 80% Breite des Monitors im Fenster
+        # Combobox sizing - normal compact size
         self.combo_width = self.monitor_width * 0.7
         self.combo_height = self.monitor_height * 0.2
-        self.combo.setFixedSize(self.combo_width, self.combo_height)
         combo_font = QFont()
         combo_font.setPointSize(int(self.combo_height * 0.4))  # Skalierung der Schriftgröße
         self.combo.setFont(combo_font)
+        self.combo.setFixedSize(int(self.combo_width), int(self.combo_height))
+        
+        # Make dropdown popup wider to show full text
+        from PySide6.QtGui import QFontMetrics
+        fm = QFontMetrics(combo_font)
+        max_width = 0
+        for i in range(self.combo.count()):
+            text_width = fm.horizontalAdvance(self.combo.itemText(i))
+            max_width = max(max_width, text_width)
+        # Add padding for scrollbar and margins
+        popup_width = max_width + 60
+        self.combo.view().setMinimumWidth(popup_width)
         self.combo.setStyleSheet(
             "QComboBox { "
             "background-color: rgba(50, 50, 50, 220); "
@@ -132,6 +186,91 @@ class MonitorItem(QGraphicsRectItem):
 
         self.proxy_combo.setFlag(QGraphicsProxyWidget.ItemIgnoresTransformations, False)
         self.update_combo_position()
+
+        # Offset/Override fields (initially hidden)
+        from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit
+        
+        self.config_widget = QWidget()
+        # Match the label styling (black background with transparency)
+        self.config_widget.setStyleSheet(
+            "QWidget { background: rgba(0, 0, 0, 150); border: none; padding: 4px; }"
+            "QLabel { color: white; background: transparent; border: none; padding: 0px; margin: 0px; }"
+            "QLineEdit { background: rgba(50, 50, 50, 200); color: white; border: 1px solid rgba(100, 100, 100, 180); padding: 1px; margin: 1px; }"
+        )
+        
+        config_layout = QVBoxLayout()
+        config_layout.setSpacing(2)
+        config_layout.setContentsMargins(4, 4, 4, 4)
+        
+        # Calculate font size based on monitor height (match label font)
+        config_font_size = int(self.monitor_height * 0.03)
+        # Increase input width for better number visibility
+        input_width = int(self.monitor_width * 0.12)
+        
+        # X Offset
+        x_layout = QHBoxLayout()
+        x_layout.setSpacing(2)
+        x_label = QLabel("X:")
+        x_label_font = QFont()
+        x_label_font.setPointSize(config_font_size)
+        x_label.setFont(x_label_font)
+        self.x_offset_input = NoScrollLineEdit("0")
+        self.x_offset_input.setFixedWidth(input_width)
+        self.x_offset_input.setPlaceholderText("0")
+        self.x_offset_input.setFont(x_label_font)
+        self.x_offset_input.monitor_item = self  # Reference to parent MonitorItem
+        x_layout.addWidget(x_label)
+        x_layout.addWidget(self.x_offset_input)
+        config_layout.addLayout(x_layout)
+        
+        # Y Offset
+        y_layout = QHBoxLayout()
+        y_layout.setSpacing(2)
+        y_label = QLabel("Y:")
+        y_label.setFont(x_label_font)
+        self.y_offset_input = NoScrollLineEdit("0")
+        self.y_offset_input.setFixedWidth(input_width)
+        self.y_offset_input.setPlaceholderText("0")
+        self.y_offset_input.setFont(x_label_font)
+        self.y_offset_input.monitor_item = self  # Reference to parent MonitorItem
+        y_layout.addWidget(y_label)
+        y_layout.addWidget(self.y_offset_input)
+        config_layout.addLayout(y_layout)
+        
+        # Width Override
+        w_layout = QHBoxLayout()
+        w_layout.setSpacing(2)
+        w_label = QLabel("W:")
+        w_label.setFont(x_label_font)
+        self.width_input = NoScrollLineEdit("-1")
+        self.width_input.setFixedWidth(input_width)
+        self.width_input.setPlaceholderText("-1")
+        self.width_input.setFont(x_label_font)
+        self.width_input.monitor_item = self  # Reference to parent MonitorItem
+        w_layout.addWidget(w_label)
+        w_layout.addWidget(self.width_input)
+        config_layout.addLayout(w_layout)
+        
+        # Height Override
+        h_layout = QHBoxLayout()
+        h_layout.setSpacing(2)
+        h_label = QLabel("H:")
+        h_label.setFont(x_label_font)
+        self.height_input = NoScrollLineEdit("-1")
+        self.height_input.setFixedWidth(input_width)
+        self.height_input.setPlaceholderText("-1")
+        self.height_input.setFont(x_label_font)
+        self.height_input.monitor_item = self  # Reference to parent MonitorItem
+        h_layout.addWidget(h_label)
+        h_layout.addWidget(self.height_input)
+        config_layout.addLayout(h_layout)
+        
+        self.config_widget.setLayout(config_layout)
+        
+        self.proxy_config = QGraphicsProxyWidget(self)
+        self.proxy_config.setWidget(self.config_widget)
+        self.proxy_config.setZValue(10)
+        self.proxy_config.hide()  # Initially hidden
 
         self.update_label()
     
@@ -196,20 +335,37 @@ class MonitorItem(QGraphicsRectItem):
             self.viewDx = dx
             self.viewDy = 0
             self.setBrush(QColor(0, 180, 0, 120))
+            self.show_config_fields()
         elif text.startswith("Panel"):
             self.name = text.split(": ")[1]
             self.is_viewport = False
             self.setBrush(QColor(180, 120, 0, 120))
+            self.show_config_fields()
         else:
             self.name = "UNASSIGNED"
             self.is_viewport = False
             self.setBrush(QColor(70, 120, 180, 120))
+            self.hide_config_fields()
 
         # Label will be updated by MainWindow with DCS coordinates
         if self.scene() and self.scene().views():
             view = self.scene().views()[0]
             if hasattr(view, 'window') and hasattr(view.window(), 'update_all_labels_with_dcs_coords'):
                 view.window().update_all_labels_with_dcs_coords()
+    
+    def show_config_fields(self):
+        """Show offset/override configuration fields"""
+        self.proxy_config.show()
+        # Position in bottom-left corner of monitor
+        config_x = 2  # Small margin from left
+        # Calculate bottom position (monitor height minus widget height minus margin)
+        widget_height = self.proxy_config.size().height()
+        config_y = self.monitor_height - widget_height - 2
+        self.proxy_config.setPos(config_x, config_y)
+    
+    def hide_config_fields(self):
+        """Hide offset/override configuration fields"""
+        self.proxy_config.hide()
 
     def update_label(self, dcs_x=None, dcs_y=None):
         """Updates the label with DCS coordinates (relative to LEFT Viewport)"""
@@ -486,6 +642,13 @@ class CodePreviewDialog(QDialog):
                 f.write(self.code)
             self.saved = True
             print(f"Successfully saved: {filepath}")
+            
+            # Also save .dml file if parent has the method
+            if self.parent() and hasattr(self.parent(), 'save_dml_file'):
+                dml_path = os.path.join(self.dcs_path, f"{self.filename}.dml")
+                self.parent().save_dml_file(dml_path)
+                print(f"Successfully saved: {dml_path}")
+            
             self.accept()
         except Exception as e:
             print(f"Error during Quick Save: {e}")
@@ -499,6 +662,14 @@ class CodePreviewDialog(QDialog):
                 with open(fn, "w", encoding="utf-8") as f:
                     f.write(self.code)
                 self.saved = True
+                
+                # Also save .dml file if parent has the method
+                if self.parent() and hasattr(self.parent(), 'save_dml_file'):
+                    # Replace .lua extension with .dml
+                    dml_path = fn.rsplit('.', 1)[0] + '.dml'
+                    self.parent().save_dml_file(dml_path)
+                    print(f"Successfully saved: {dml_path}")
+                
                 self.accept()
             except Exception as e:
                 print(f"Error saving: {e}")
@@ -521,7 +692,52 @@ class MainWindow(QMainWindow):
         self.view = ZoomableGraphicsView(self.scene)
         self.view.setDragMode(QGraphicsView.RubberBandDrag)
 
+        # Name and Description fields
+        from PySide6.QtWidgets import QLineEdit, QLabel
+        
+        name_layout = QHBoxLayout()
+        name_label = QLabel("Layout Name:")
+        self.name_input = QLineEdit()
+        self.name_input.setText("MyCockpit")
+        self.name_input.setPlaceholderText("Enter layout name")
+        self.name_input.setMaximumWidth(200)
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_input)
+        name_layout.addStretch()
+        
+        desc_layout = QHBoxLayout()
+        desc_label = QLabel("Description:")
+        self.desc_input = QLineEdit()
+        self.desc_input.setText("Generated by DCS Monitor Tool")
+        self.desc_input.setPlaceholderText("Enter description")
+        self.desc_input.setMaximumWidth(300)
+        desc_layout.addWidget(desc_label)
+        desc_layout.addWidget(self.desc_input)
+        desc_layout.addStretch()
+        
+        # Controls legend
+        legend_layout = QHBoxLayout()
+        legend_label = QLabel(
+            "🎮 Controls: "
+            "<b>Ctrl + Scroll</b> = Zoom | "
+            "<b>Middle Mouse</b> = Pan | "
+            "<b>Click Monitor</b> = Bring to Front"
+        )
+        legend_label.setStyleSheet(
+            "color: #888; "
+            "font-size: 10pt; "
+            "padding: 4px; "
+            "background: rgba(50, 50, 50, 100); "
+            "border-radius: 3px;"
+        )
+        legend_layout.addWidget(legend_label)
+        legend_layout.addStretch()
+
         # Buttons
+        btn_load = QPushButton("📂 Load Layout")
+        btn_load.clicked.connect(self.load_layout)
+        btn_load.setToolTip("Load monitor assignments from .dml file")
+        
         btn_display_settings = QPushButton("🖥️ Windows Display Settings")
         btn_display_settings.clicked.connect(self.open_display_settings)
         btn_display_settings.setToolTip("Open Windows Display Settings to arrange monitors")
@@ -539,12 +755,16 @@ class MainWindow(QMainWindow):
         # Button-Layout (oben)
         button_layout = QHBoxLayout()
         button_layout.addStretch()
+        button_layout.addWidget(btn_load)
         button_layout.addWidget(btn_offsets)
         button_layout.addWidget(btn_display_settings)
         button_layout.addWidget(btn_refresh)
 
         # Haupt-Layout
         layout = QVBoxLayout()
+        layout.addLayout(name_layout)
+        layout.addLayout(desc_layout)
+        layout.addLayout(legend_layout)
         layout.addLayout(button_layout)
         layout.addWidget(self.view)
         layout.addWidget(btn_export)
@@ -583,7 +803,7 @@ class MainWindow(QMainWindow):
                 print(f"Could not find saved text '{saved_text}' in combo for {monitor_id}")
     
     def load_offsets_config(self):
-        """Loads the offset config or creates a new one with all available panels/viewports"""
+        """Loads the global config (only DCS path)"""
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
@@ -591,40 +811,18 @@ class MainWindow(QMainWindow):
             except:
                 pass
         
-        # Create default config with all known panels/viewports
+        # Create default config with only global settings
         default_config = {
             "_dcs_monitor_setup_path": "C:\\DCS\\DCS World\\Config\\MonitorSetup",
-            "_comment": "Adjust _dcs_monitor_setup_path to your DCS installation folder. Use width/height = -1 for original monitor size, or set custom values to override output size (position calculation always uses original size).",
-            "_name": "MyCockpit",
-            "_description": "Generated by DCS Monitor Tool",
-            "Left": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "Center": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "Right": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "FA_18C_IFEI": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "FA_18C_RWR": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "FA_18C_SARI": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "LEFT_MFCD": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "CENTER_MFCD": {"x": 0, "y": 0, "width": -1, "height": -1},
-            "RIGHT_MFCD": {"x": 0, "y": 0, "width": -1, "height": -1}
+            "_comment": "This is the global config. Only the DCS path is stored here. All other settings (name, description, offsets) are stored per-layout in .dml files."
         }
         return default_config
     
     def save_offsets_config(self, config):
-        """Saves the offset config"""
+        """Saves the global config"""
         try:
-            # Sort by dropdown order
-            # Meta entries first (with underscore)
-            order = ["_dcs_monitor_setup_path", "_comment", "_name", "_description", 
-                     "Left", "Center", "Right", "FA_18C_IFEI", "FA_18C_RWR", "FA_18C_SARI", 
-                     "LEFT_MFCD", "CENTER_MFCD", "RIGHT_MFCD"]
-            sorted_config = {k: config[k] for k in order if k in config}
-            # Add any new entries that are not in the order list
-            for k in config:
-                if k not in sorted_config:
-                    sorted_config[k] = config[k]
-            
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump(sorted_config, f, indent=4)
+                json.dump(config, f, indent=4)
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
@@ -664,6 +862,166 @@ class MainWindow(QMainWindow):
                 os.system('xrandr --query || gnome-control-center display || systemsettings5 display')
         except Exception as e:
             print(f"Error opening display settings: {e}")
+    
+    def save_dml_file(self, filepath):
+        """Save monitor assignments to .dml file"""
+        try:
+            dml_data = {
+                "version": "1.0",
+                "name": self.name_input.text() or "MyCockpit",
+                "description": self.desc_input.text() or "Generated by DCS Monitor Tool",
+                "monitor_assignments": {},
+                "monitor_info": {},
+                "monitor_offsets": {}
+            }
+            
+            for item in self.scene.items():
+                if isinstance(item, MonitorItem):
+                    monitor_id = item.monitor_id
+                    assignment = item.combo.currentText()
+                    
+                    # Only save non-UNASSIGNED monitors
+                    if assignment != "UNASSIGNED":
+                        dml_data["monitor_assignments"][monitor_id] = assignment
+                        
+                        # Save offsets/overrides for assigned monitors
+                        try:
+                            x_offset = int(item.x_offset_input.text() or "0")
+                            y_offset = int(item.y_offset_input.text() or "0")
+                            width_override = int(item.width_input.text() or "-1")
+                            height_override = int(item.height_input.text() or "-1")
+                            
+                            dml_data["monitor_offsets"][monitor_id] = {
+                                "x": x_offset,
+                                "y": y_offset,
+                                "width": width_override,
+                                "height": height_override
+                            }
+                        except ValueError:
+                            # If parsing fails, use defaults
+                            dml_data["monitor_offsets"][monitor_id] = {
+                                "x": 0,
+                                "y": 0,
+                                "width": -1,
+                                "height": -1
+                            }
+                    
+                    # Save monitor info for validation
+                    dml_data["monitor_info"][monitor_id] = {
+                        "width": item.monitor_width,
+                        "height": item.monitor_height,
+                        "x": int(item.pos().x()),
+                        "y": int(item.pos().y())
+                    }
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(dml_data, f, indent=4)
+            
+            return True
+        except Exception as e:
+            print(f"Error saving .dml file: {e}")
+            return False
+    
+    def load_layout(self):
+        """Load monitor assignments from .dml file"""
+        # Get DCS path from config and use it as starting directory
+        config = self.load_offsets_config()
+        dcs_path = config.get("_dcs_monitor_setup_path", "")
+        
+        # Use DCS path as starting directory if it exists, otherwise use current directory
+        start_dir = dcs_path if dcs_path and os.path.isdir(dcs_path) else ""
+        
+        fn, _ = QFileDialog.getOpenFileName(
+            self, "Load Layout", start_dir, "DCS Monitor Layout (*.dml)"
+        )
+        if not fn:
+            return
+        
+        try:
+            with open(fn, 'r', encoding='utf-8') as f:
+                dml_data = json.load(f)
+            
+            if "version" not in dml_data or "monitor_assignments" not in dml_data:
+                print("Invalid .dml file format")
+                return
+            
+            # Check if monitor configuration matches
+            warnings = []
+            if "monitor_info" in dml_data:
+                for monitor_id, saved_info in dml_data["monitor_info"].items():
+                    # Find corresponding monitor in current scene
+                    found = False
+                    for item in self.scene.items():
+                        if isinstance(item, MonitorItem) and item.monitor_id == monitor_id:
+                            found = True
+                            # Check if resolution or position changed
+                            if (item.monitor_width != saved_info["width"] or 
+                                item.monitor_height != saved_info["height"]):
+                                warnings.append(
+                                    f"{monitor_id}: Resolution changed from "
+                                    f"{saved_info['width']}x{saved_info['height']} to "
+                                    f"{item.monitor_width}x{item.monitor_height}"
+                                )
+                            if (int(item.pos().x()) != saved_info["x"] or 
+                                int(item.pos().y()) != saved_info["y"]):
+                                warnings.append(
+                                    f"{monitor_id}: Position changed from "
+                                    f"({saved_info['x']}, {saved_info['y']}) to "
+                                    f"({int(item.pos().x())}, {int(item.pos().y())})"
+                                )
+                            break
+                    
+                    if not found:
+                        warnings.append(f"{monitor_id}: Monitor not found in current configuration")
+            
+            # Show warnings if any
+            if warnings:
+                from PySide6.QtWidgets import QMessageBox
+                warning_msg = "Monitor configuration has changed:\n\n" + "\n".join(warnings)
+                warning_msg += "\n\nDo you want to load the layout anyway?"
+                
+                reply = QMessageBox.warning(
+                    self, "Monitor Configuration Changed", warning_msg,
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+                )
+                
+                if reply == QMessageBox.No:
+                    return
+            
+            # Load name and description
+            if "name" in dml_data:
+                self.name_input.setText(dml_data["name"])
+            if "description" in dml_data:
+                self.desc_input.setText(dml_data["description"])
+            
+            # Apply assignments and offsets
+            loaded_count = 0
+            for item in self.scene.items():
+                if isinstance(item, MonitorItem):
+                    monitor_id = item.monitor_id
+                    if monitor_id in dml_data["monitor_assignments"]:
+                        assignment = dml_data["monitor_assignments"][monitor_id]
+                        index = item.combo.findText(assignment)
+                        if index >= 0:
+                            item.combo.setCurrentIndex(index)
+                            loaded_count += 1
+                            
+                            # Load offsets if available
+                            if "monitor_offsets" in dml_data and monitor_id in dml_data["monitor_offsets"]:
+                                offsets = dml_data["monitor_offsets"][monitor_id]
+                                item.x_offset_input.setText(str(offsets.get("x", 0)))
+                                item.y_offset_input.setText(str(offsets.get("y", 0)))
+                                item.width_input.setText(str(offsets.get("width", -1)))
+                                item.height_input.setText(str(offsets.get("height", -1)))
+                        else:
+                            print(f"Warning: Assignment '{assignment}' not found for {monitor_id}")
+            
+            print(f"Successfully loaded {loaded_count} monitor assignments from {fn}")
+            
+        except json.JSONDecodeError as e:
+            print(f"Error parsing .dml file: {e}")
+        except Exception as e:
+            print(f"Error loading layout: {e}")
     
     def update_all_labels_with_dcs_coords(self):
         """Updates all monitor labels with DCS coordinates relative to LEFT Viewport"""
@@ -861,8 +1219,8 @@ class MainWindow(QMainWindow):
         # Show preview dialog with DCS path
         config = self.load_offsets_config()
         dcs_path = config.get("_dcs_monitor_setup_path", "")
-        filename = config.get("_name", "")
-        dialog = CodePreviewDialog(lua_code, filename, dcs_path,  self)
+        filename = self.name_input.text() or "MyCockpit"
+        dialog = CodePreviewDialog(lua_code, filename, dcs_path, self)
         dialog.exec()
     
     def generate_lua_code(self, items):
@@ -899,9 +1257,6 @@ class MainWindow(QMainWindow):
         min_x = min(m.x for m in viewport_monitors)
         min_y = min(m.y for m in viewport_monitors)
         
-        # Load offsets from config
-        offsets = self.load_offsets_config()
-        
         # ========================================
         # MODE: PHYSICAL 1:1
         # ========================================
@@ -914,24 +1269,27 @@ class MainWindow(QMainWindow):
             dcs_x = x - min_x
             dcs_y = y - min_y
             
-            # Apply offsets and size overrides from config
+            # Apply offsets and size overrides from MonitorItem input fields
             output_width = width  # Default: original monitor width
             output_height = height  # Default: original monitor height
             
-            if it.name in offsets:
-                offset_x = offsets[it.name].get("x", 0)
-                offset_y = offsets[it.name].get("y", 0)
+            try:
+                offset_x = int(it.x_offset_input.text() or "0")
+                offset_y = int(it.y_offset_input.text() or "0")
                 dcs_x += offset_x
                 dcs_y += offset_y
                 
                 # Check for width/height overrides (-1 means use original)
-                config_width = offsets[it.name].get("width", -1)
-                config_height = offsets[it.name].get("height", -1)
+                config_width = int(it.width_input.text() or "-1")
+                config_height = int(it.height_input.text() or "-1")
                 
                 if config_width != -1:
                     output_width = config_width
                 if config_height != -1:
                     output_height = config_height
+            except (ValueError, AttributeError):
+                # If parsing fails or fields don't exist, use defaults
+                pass
             
             if it.is_viewport:
                 # Physical width, physical X position
@@ -950,12 +1308,12 @@ class MainWindow(QMainWindow):
         lines = []
         lines.append("_ = function(p) return p; end;")
         
-        # Use name and description from config
-        config_name = offsets.get("_name", "MyCockpit")
-        config_description = offsets.get("_description", "Generated by DCS Monitor Tool")
+        # Use name and description from GUI inputs
+        layout_name = self.name_input.text() or "MyCockpit"
+        layout_description = self.desc_input.text() or "Generated by DCS Monitor Tool"
         
-        lines.append(f"name = _('{config_name}');")
-        lines.append(f"Description = '{config_description}'")
+        lines.append(f"name = _('{layout_name}');")
+        lines.append(f"Description = '{layout_description}'")
         lines.append("")
         lines.append("Viewports =")
         lines.append("{")
