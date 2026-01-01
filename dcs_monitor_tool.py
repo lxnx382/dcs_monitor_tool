@@ -522,7 +522,11 @@ class MainWindow(QMainWindow):
         self.view.setDragMode(QGraphicsView.RubberBandDrag)
 
         # Buttons
-        btn_refresh = QPushButton("🔄 Refresh Monitors")
+        btn_display_settings = QPushButton("🖥️ Windows Display Settings")
+        btn_display_settings.clicked.connect(self.open_display_settings)
+        btn_display_settings.setToolTip("Open Windows Display Settings to arrange monitors")
+        
+        btn_refresh = QPushButton("🔄 Refresh Monitor Layout")
         btn_refresh.clicked.connect(self.refresh_monitors)
         
         btn_offsets = QPushButton("⚙️ Config")
@@ -536,6 +540,7 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         button_layout.addWidget(btn_offsets)
+        button_layout.addWidget(btn_display_settings)
         button_layout.addWidget(btn_refresh)
 
         # Haupt-Layout
@@ -644,6 +649,21 @@ class MainWindow(QMainWindow):
                 os.system(f'xdg-open "{self.config_file}"')
         except Exception as e:
             print(f"Error opening config: {e}")
+    
+    def open_display_settings(self):
+        """Opens Windows Display Settings"""
+        try:
+            if sys.platform == 'win32':
+                # Open Windows Display Settings using ms-settings URI
+                os.system('start ms-settings:display')
+            elif sys.platform == 'darwin':
+                # macOS System Preferences Displays
+                os.system('open "x-apple.systempreferences:com.apple.preference.displays"')
+            else:
+                # Linux - try common display settings commands
+                os.system('xrandr --query || gnome-control-center display || systemsettings5 display')
+        except Exception as e:
+            print(f"Error opening display settings: {e}")
     
     def update_all_labels_with_dcs_coords(self):
         """Updates all monitor labels with DCS coordinates relative to LEFT Viewport"""

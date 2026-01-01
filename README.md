@@ -2,7 +2,7 @@
 
 **Create the Perfect MonitorSetup Layout.lua for your DCS Configuration**
 
-A visual tool for configuring multi-monitor setups in DCS World. Simply drag, assign, and export your cockpit display layout with ease!
+A visual tool for configuring multi-monitor setups in DCS World. The tool reads your Windows monitor layout, lets you assign each monitor as viewport or panel, and exports the configuration for DCS!
 
 ---
 
@@ -39,27 +39,30 @@ python dcs_monitor_tool.py
 
 ## 📖 How to Use
 
-### 1️⃣ **Monitor Detection**
-When you launch the tool, it automatically detects all your Windows monitors and displays them in their actual positions.
+### 1️⃣ **Arrange Monitors in Windows**
+First, arrange your physical monitors in Windows Display Settings to match your desk setup. The tool will read this exact layout.
 
-### 2️⃣ **Assign Monitors**
+### 2️⃣ **Load Monitor Layout**
+When you launch the tool, it automatically detects all your Windows monitors and displays them in their exact positions. If you change your Windows monitor arrangement, click **"🔄 Refresh Monitors"** to reload.
+
+### 3️⃣ **Assign Monitors**
 Click the dropdown on each monitor to assign it as:
 - **Viewports**: `Left`, `Center`, `Right` (main 3D views)
 - **Panels**: Various cockpit instruments (F/A-18C IFEI, RWR, SARI, MFCDs, etc.)
 
-### 3️⃣ **Review Layout**
+### 4️⃣ **Review Layout**
 - The orange bounding box shows your total DCS resolution
 - Labels show both Windows and DCS coordinates
 - Assigned monitors change color (green for viewports, orange for panels)
 
-### 4️⃣ **Export Configuration**
+### 5️⃣ **Export Configuration**
 1. Click **"Export DCS Lua"**
 2. Review the generated Lua code in the preview window
 3. Either:
    - Use **"💾 Quick Save to DCS"** to save directly to your DCS folder
    - Or **"Save as..."** to save anywhere you want
 
-### 5️⃣ **Configure DCS**
+### 6️⃣ **Configure DCS**
 The exported `.lua` file goes into:
 ```
 C:\DCS\DCS World\Config\MonitorSetup\YourConfig.lua
